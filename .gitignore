@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.env
+venv/
+env/
+
+# SQLite DB (runtime data, not source)
+*.db
+*.sqlite3
+
+# ChromeDriver temp profiles
+chrome_autoapply_*/
+
+# Screenshots from automation
+*.png
+
+# Node / React
+node_modules/
+frontend/build/
+frontend/.env.local
+frontend/.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
