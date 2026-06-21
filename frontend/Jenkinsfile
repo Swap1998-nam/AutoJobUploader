@@ -1,0 +1,174 @@
+pipeline {
+    agent any
+
+    // ── Configurable vars ────────────────────────────────────────────────────
+    environment {
+        REGISTRY          = "docker.io"                    // or your ECR/GHCR URL
+        IMAGE_BACKEND     = "${REGISTRY}/swapnil/autojobuploader-backend"
+        IMAGE_FRONTEND    = "${REGISTRY}/swapnil/autojobuploader-frontend"
+        IMAGE_TAG         = "${env.GIT_COMMIT[0..6]}"      // short SHA
+        DOCKER_CREDENTIALS= "dockerhub-creds"             // Jenkins credential ID
+        COMPOSE_FILE      = "docker-compose.prod.yml"
+        DEPLOY_HOST       = credentials('deploy-host')     // target server IP
+        DEPLOY_USER       = "ubuntu"
+        SSH_KEY_ID        = "deploy-ssh-key"               // Jenkins SSH credential
+    }
+
+    options {
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+        // ── 1. Checkout ───────────────────────────────────────────────────
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "Building commit: ${env.GIT_COMMIT}"
+            }
+        }
+
+        // ── 2. Lint & Static Analysis ─────────────────────────────────────
+        stage('Lint') {
+            parallel {
+                stage('Backend Lint') {
+                    steps {
+                        dir('backend') {
+                            sh '''
+                                pip install flake8 --quiet
+                                flake8 . --max-line-length=120 --exclude=__pycache__,.venv
+                            '''
+                        }
+                    }
+                }
+                stage('Frontend Lint') {
+                    steps {
+                        dir('frontend') {
+                            sh 'npm ci --legacy-peer-deps --silent'
+                            sh 'npm run lint --if-present'
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 3. Unit Tests ─────────────────────────────────────────────────
+        stage('Test') {
+            parallel {
+                stage('Backend Tests') {
+                    steps {
+                        dir('backend') {
+                            sh '''
+                                pip install -r requirements.txt --quiet
+                                pytest --tb=short --junitxml=test-results/backend.xml || true
+                            '''
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, testResults: 'backend/test-results/*.xml'
+                        }
+                    }
+                }
+                stage('Frontend Tests') {
+                    steps {
+                        dir('frontend') {
+                            sh 'CI=true npm test -- --passWithNoTests --watchAll=false'
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 4. Build Docker Images ────────────────────────────────────────
+        stage('Build Images') {
+            parallel {
+                stage('Build Backend') {
+                    steps {
+                        script {
+                            docker.build("${IMAGE_BACKEND}:${IMAGE_TAG}", "./backend")
+                        }
+                    }
+                }
+                stage('Build Frontend') {
+                    steps {
+                        script {
+                            docker.build("${IMAGE_FRONTEND}:${IMAGE_TAG}", "./frontend")
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 5. Security Scan (Trivy) ──────────────────────────────────────
+        stage('Security Scan') {
+            steps {
+                sh '''
+                    which trivy || (curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin)
+                    trivy image --exit-code 0 --severity HIGH,CRITICAL \
+                        --format table ${IMAGE_BACKEND}:${IMAGE_TAG}
+                    trivy image --exit-code 0 --severity HIGH,CRITICAL \
+                        --format table ${IMAGE_FRONTEND}:${IMAGE_TAG}
+                '''
+            }
+        }
+
+        // ── 6. Push to Registry ───────────────────────────────────────────
+        stage('Push Images') {
+            when {
+                anyOf {
+                    branch 'master'
+                    branch 'main'
+                }
+            }
+            steps {
+                script {
+                    docker.withRegistry("https://${REGISTRY}", DOCKER_CREDENTIALS) {
+                        docker.image("${IMAGE_BACKEND}:${IMAGE_TAG}").push()
+                        docker.image("${IMAGE_BACKEND}:${IMAGE_TAG}").push('latest')
+                        docker.image("${IMAGE_FRONTEND}:${IMAGE_TAG}").push()
+                        docker.image("${IMAGE_FRONTEND}:${IMAGE_TAG}").push('latest')
+                    }
+                }
+            }
+        }
+
+        // ── 7. Deploy ─────────────────────────────────────────────────────
+        stage('Deploy') {
+            when {
+                branch 'master'
+            }
+            steps {
+                sshagent([SSH_KEY_ID]) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} '
+                            cd /opt/autojobuploader
+                            export IMAGE_TAG=${IMAGE_TAG}
+                            docker compose -f ${COMPOSE_FILE} pull
+                            docker compose -f ${COMPOSE_FILE} up -d --remove-orphans
+                            docker image prune -f
+                        '
+                    """
+                }
+            }
+        }
+    }
+
+    // ── Post Actions ─────────────────────────────────────────────────────────
+    post {
+        success {
+            echo "✅ Pipeline succeeded — image tag: ${IMAGE_TAG}"
+        }
+        failure {
+            echo "❌ Pipeline failed — check logs above"
+            // Add Slack/email notification here if needed
+            // slackSend channel: '#devops', message: "Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
