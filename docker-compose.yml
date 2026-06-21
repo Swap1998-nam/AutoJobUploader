@@ -1,15 +1,10 @@
-version: '3.8'
-
-# ── Production compose — images pulled from registry, not built locally ───────
-# Usage: IMAGE_TAG=abc1234 docker compose -f docker-compose.prod.yml up -d
-
 services:
 
   backend:
-    image: docker.io/swapnil/autojobuploader-backend:${IMAGE_TAG:-latest}
+    build: ./backend
     container_name: job-backend
     restart: unless-stopped
-    env_file: .env                 # mount secrets at runtime — never bake into image
+    env_file: .env
     expose:
       - "8000"
     networks:
@@ -21,7 +16,7 @@ services:
       retries: 3
 
   frontend:
-    image: docker.io/swapnil/autojobuploader-frontend:${IMAGE_TAG:-latest}
+    build: ./frontend
     container_name: job-frontend
     restart: unless-stopped
     expose:
