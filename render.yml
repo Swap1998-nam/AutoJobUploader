@@ -1,0 +1,30 @@
+services:
+  # ─── Python Backend ───────────────────────────────────────────────────────────
+  - type: web
+    name: autojobuploader-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 8000
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        value: 8000
+    healthCheckPath: /health
+    autoDeploy: true
+
+  # ─── React Frontend ───────────────────────────────────────────────────────────
+  - type: web
+    name: autojobuploader-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npx serve -s build -l 3000
+    envVars:
+      - key: NODE_VERSION
+        value: 18.17.0
+      - key: REACT_APP_API_URL
+        # Replace with your actual backend Render URL after first deploy
+        value: https://autojobuploader-backend.onrender.com
+    autoDeploy: true
