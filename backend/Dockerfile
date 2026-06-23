@@ -1,40 +1,31 @@
-# ─── Stage 1: Builder ────────────────────────────────────────────────────────
-FROM python:3.11-slim AS builder
+# Use official Python image
+FROM python:3.12-slim
 
+# Set working directory
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --upgrade pip \
-    && pip install --prefix=/install --no-cache-dir -r requirements.txt
-
-# ─── Stage 2: Runtime ────────────────────────────────────────────────────────
-FROM python:3.11-slim AS runtime
-
-WORKDIR /app
-
-# Install Chrome + ChromeDriver (needed for Selenium)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install Chrome dependencies required for Selenium
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    unzip \
+    gnupg \
     chromium \
     chromium-driver \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Tell webdriver-manager / selenium to use system chromium
-ENV CHROME_BIN=/usr/bin/chromium
-ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+# Copy requirements file
+COPY requirements.txt .
 
-# Copy installed Python packages from builder
-COPY --from=builder /install /usr/local
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy app source
+# Copy application code
 COPY . .
 
-# Non-root user
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
-USER appuser
-
+# Expose FastAPI port
 EXPOSE 8000
 
+# Start FastAPI application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
