@@ -1,23 +1,36 @@
-# ─── Stage 1: Build React app ────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+# ==========================
+# Build Stage
+# ==========================
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# Copy dependency files
 COPY package*.json ./
-RUN npm ci --legacy-peer-deps
 
+# Install dependencies
+RUN npm ci
+
+# Copy source code
 COPY . .
 
+# Build React application
 RUN npm run build
 
-# ─── Stage 2: Serve via Nginx ─────────────────────────────────────────────────
-FROM nginx:1.25-alpine AS runtime
+# ==========================
+# Production Stage
+# ==========================
+FROM nginx:1.28-alpine
 
-RUN rm -rf /usr/share/nginx/html/*
+# Remove default nginx configuration
+RUN rm /etc/nginx/conf.d/default.conf
 
-COPY --from=builder /app/build /usr/share/nginx/html
+# Copy custom nginx config
 COPY nginx-spa.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 3000
+# Copy build artifacts
+COPY --from=builder /app/build /usr/share/nginx/html
+
+EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]
