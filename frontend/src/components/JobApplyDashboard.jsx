@@ -302,7 +302,7 @@ const STYLES = `
 `;
 
 // ─── Config ────────────────────────────────────────────────────────────────
-const API_BASE = "http://localhost:8001";
+const API_BASE = " ";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: "⬡" },
